@@ -1,58 +1,29 @@
-#pragma once
 
 #include "map.h"
 #include "tool.h"
 #include <string>
 #include <opencv2/opencv.hpp>
 
+Map::Map(std::string map_filename) 
+{
+	chassis_L_ = 3.0;
+	primitive_path_length_ = 6.0;
+	validity_checking_resolution_ = 1.0; // Change here to try different settings
 
-
-Map::Map(std::string map_filename) {
-	critical_points.clear();
+	critical_points_.clear();
 	critical_points_orientation.clear();
 	generatePolyMap(map_filename);
 
-	//// We de-duplicate critical points
-	//std::sort(critical_points.begin(), critical_points.end(), 
-	//	[](const auto& a, const auto& b) {return a.first < b.first || (a.first == b.first && a.second < b.second); });
-	//critical_points.erase(
-	//	std::unique(critical_points.begin(), critical_points.end(), 
-	//		[](const auto& a, const auto& b) {return a.first == b.first && a.second == b.second; }
-	//		), critical_points.end());
+	critical_points_num_ = critical_points_.size();
 
-	critical_points_num_ = critical_points.size();
-	critical_points_x_ = new int[critical_points_num_];
-	critical_points_y_ = new int[critical_points_num_];
-	for (unsigned int i = 0; i < critical_points.size(); ++i)
-	{
-		// YT: here we can safely use round, because the critical points in C++ must be near an integer
-		critical_points_x_[i] = round(critical_points[i].first);
-		critical_points_y_[i] = round(critical_points[i].second);
-	}
-}
-
-bool Map::isCollisionFree(double x, double y, double theta)
-{
-	if (x < 4 || x > xsize_ - 4 || y < 4 || y > ysize_ - 4)
-		return false;
-
-	std::vector<std::pair<double, double> > footprint = polarRotateAndMoveToXy(x, y, theta);
-	for (unsigned int i = 0; i < footprint.size(); ++i)
-	{
-		if (data_[(int)(floor(footprint[i].second)*xsize_ + floor(footprint[i].first))] != 0) {
-			std::cout << "";
-			return false;
-
-		}
-	}
-	return true;
+	sparse_checking_num_ = 0;
+	dense_checking_num_ = 0;
+	all_checking_num_ = 0;
 }
 
 void Map::generatePolyMap(std::string map_filename)
 {
-
-	// std::tuple<Eigen::MatrixXi,std::vector<Eigen::Vector2f>>
-
+	// opencv is only used here for generating grid-map
 	cv::Mat map_img = cv::imread(map_filename, cv::IMREAD_GRAYSCALE);
 	if (map_img.empty())
 	{
@@ -95,17 +66,6 @@ void Map::generatePolyMap(std::string map_filename)
 		}
 	}
 
-
-	//for (int i = 0; i < map.rows(); i++) {
-	//	for (int j = 0; j < map.cols(); j++) {
-	//		if (map(i, j) == 0)
-	//			map(i, j) = 254;
-	//		else if (map(i, j) >= 254)
-	//			map(i, j) = 0;
-	//	}
-	//}
-
-
 	// We add the boundary of the map
 	for (unsigned int row = 0; row < ysize_; ++row)
 	{
@@ -125,38 +85,28 @@ void Map::generatePolyMap(std::string map_filename)
 		}
 	}
 
-	//for (int i = 0; i < map.rows(); i++) {
-	//	for (int j = 0; j < map.cols(); j++) {
-	//		if (i == 0 || j == 0 || i == map.rows() - 1 || j == map.cols() - 1) {
-	//			map(i, j) = 254;
-	//		}
-	//	}
-	//}
+	// We obtain distinct obstacles
+	sedFill();
 
-
-	//std::vector<Eigen::Vector2i> obstacle = sedFill(map);
-
-	//std::vector<std::pair<int, int> > g_obs;
-	sedFill(g_obs);
-
-
-	// We prepare the critical obstacles (grids)
+	// We calculate the critical obstacles (grids)
 	// For each obstacle, we check whether its 8-dir neighbour is a 4-neighbor obstacle-free grid
 
+	// We collect all obstacle grids
 	std::vector<std::pair<int, int> > all_temp;
-	all_temp.reserve(10000);
+	all_temp.reserve(xsize_*ysize_);
 	for (unsigned int i = 0; i < xsize_; ++i)
 	{
 		for (unsigned int j = 0; j < ysize_; ++j)
 		{
 			if (data_[j*xsize_ + i] == 254)
-				all_temp.push_back(std::pair<int, int>(i, j));
+				all_temp.emplace_back(std::pair<int, int>(i, j));
 		}
 	}
+	
+	// We get the 4-neighbours of obstacle grids
 	int n_temp = all_temp.size();
 	all_temp.insert(all_temp.end(), all_temp.begin(), all_temp.end());
 	all_temp.insert(all_temp.end(), all_temp.begin(), all_temp.end());
-
 	for (unsigned int i = 0; i < n_temp; ++i)
 	{
 		all_temp[i].first += 1;
@@ -171,19 +121,15 @@ void Map::generatePolyMap(std::string map_filename)
 
 	//// Here we must remove the boundary obstacles, i.e., <= 0 but not < 0
 	//// This is because we will find their adjacent obstacles in the next step
-	//all_temp.erase(std::remove_if(all_temp.begin(), all_temp.end(),
-	//	[&](const auto& a) {return a.first <= 0 || a.first >= xsize_ - 1 || a.second <= 0 || a.second >= ysize_ - 1; }), 
-	//	all_temp.end());
-
 	auto all_temp_temp = all_temp;
 	all_temp.clear();
+	all_temp.reserve(all_temp_temp.size());
 	for (auto iter = all_temp_temp.begin(); iter != all_temp_temp.end(); ++iter)
 	{
 		if (iter->first <= 0 || iter->first >= xsize_ - 1 || iter->second <= 0 || iter->second >= ysize_ - 1)
 			continue;
-		all_temp.push_back(*iter);
+		all_temp.emplace_back(*iter);
 	}
-
 
 	std::vector<std::pair<int, int> > updated_all_temp;
 	updated_all_temp.reserve(all_temp.size());
@@ -196,13 +142,10 @@ void Map::generatePolyMap(std::string map_filename)
 		{
 			continue;
 		}
-		updated_all_temp.push_back(*iter);
+		updated_all_temp.emplace_back(*iter);
 	}
 	
-
-
 	// We use precise location of obstacle corners
-
 	int x, y;
 	for (auto iter = updated_all_temp.begin(); iter != updated_all_temp.end(); ++iter)
 	{
@@ -222,96 +165,36 @@ void Map::generatePolyMap(std::string map_filename)
 		if (count >= 2)
 			continue;
 
-
+		// Here we don't add 0.5 because in C++ the obstacle occupies integer grids
+		// The orientation is pointing INSIDE the obstacle corner
 		if (data_[(y - 1)*xsize_ + (x - 1)] == 254)
 		{
-			//			critical_points.push_back(std::pair<double, double>(x - 0.5, y - 0.5));
-			critical_points.push_back(std::pair<double, double>(x, y));
-			critical_points_orientation.push_back(-3.0 / 4 * M_PI);
+			critical_points_.emplace_back(std::pair<double, double>(x, y));
+			critical_points_orientation.emplace_back(-3.0 / 4 * M_PI);
 		}
 		else if (data_[(y + 1)*xsize_ + (x - 1)] == 254)
 		{
-			//critical_points.push_back(std::pair<double, double>(x - 0.5, y + 0.5));
-			critical_points.push_back(std::pair<double, double>(x, y + 1));
-			critical_points_orientation.push_back(3.0 / 4 * M_PI);
-
+			critical_points_.emplace_back(std::pair<double, double>(x, y + 1));
+			critical_points_orientation.emplace_back(3.0 / 4 * M_PI);
 		}
 		else if (data_[(y - 1)*xsize_ + (x + 1)] == 254)
 		{
-			//critical_points.push_back(std::pair<double, double>(x + 0.5, y - 0.5));
-			critical_points.push_back(std::pair<double, double>(x + 1, y));
-			critical_points_orientation.push_back(-1.0 / 4 * M_PI);
-
+			critical_points_.emplace_back(std::pair<double, double>(x + 1, y));
+			critical_points_orientation.emplace_back(-1.0 / 4 * M_PI);
 		}
 		else
 		{
-			//critical_points.push_back(std::pair<double, double>(x + 0.5, y + 0.5));
-			critical_points.push_back(std::pair<double, double>(x + 1, y + 1));
-			critical_points_orientation.push_back(1.0 / 4 * M_PI);
-
+			critical_points_.emplace_back(std::pair<double, double>(x + 1, y + 1));
+			critical_points_orientation.emplace_back(1.0 / 4 * M_PI);
 		}
 	}
-
-	//for (int i = 0; i < temp_obs.size(); i++) {
-	//	int x = temp_obs[i][0];
-	//	int y = temp_obs[i][1];
-	//	int temp_x, temp_y;
-	//	temp_x = x - 1, temp_y = y - 1;
-	//	if (temp_x >= 0 && temp_x < map.rows() && temp_y >= 0 && temp_y < map.cols()) {
-	//		if (map(x - 1, y - 1) == 254) {
-	//			Eigen::Vector2f pos;
-	//			pos << x - 0.5, y - 0.5;
-	//			critical_points.push_back(pos);
-	//		}
-	//	}
-
-	//	temp_x = x - 1, temp_y = y + 1;
-	//	if (temp_x >= 0 && temp_x < map.rows() && temp_y >= 0 && temp_y < map.cols()) {
-	//		if (map(x - 1, y + 1) == 254) {
-	//			Eigen::Vector2f pos;
-	//			pos << x - 0.5, y + 0.5;
-	//			critical_points.push_back(pos);
-	//		}
-	//	}
-
-	//	temp_x = x + 1, temp_y = y + 1;
-	//	if (temp_x >= 0 && temp_x < map.rows() && temp_y >= 0 && temp_y < map.cols()) {
-	//		if (map(x + 1, y + 1) == 254) {
-	//			Eigen::Vector2f pos;
-	//			pos << x + 0.5, y + 0.5;
-	//			critical_points.push_back(pos);
-	//		}
-	//	}
-
-	//	temp_x = x + 1, temp_y = y - 1;
-	//	if (temp_x >= 0 && temp_x < map.rows() && temp_y >= 0 && temp_y < map.cols()) {
-	//		if (map(x + 1, y - 1) == 254) {
-	//			Eigen::Vector2f pos;
-	//			pos << x + 0.5, y - 0.5;
-	//			critical_points.push_back(pos);
-	//		}
-	//	}
-
-	//}
-
-
-	//Mmap_ = map;
-	//for (int i = 0; i < critical_points.size(); i++) {
-	//	std::pair<double, double> temp;
-	//	temp.first = critical_points[i](0);
-	//	temp.second = critical_points[i](1);
-
-	//	g_obs.push_back(temp);
-	//}
-
 }
 
-
-void Map::sedFill(std::vector<std::pair<double, double> >& ObsPosition)
+void Map::sedFill()
 {
-	ObsPosition.clear();
-	int nx = xsize_;
-	int ny = ysize_;
+	obs_.clear();
+	unsigned int nx = xsize_;
+	unsigned int ny = ysize_;
 
 	// We first copy the map cost value to another 2D array
 	int** mask;
@@ -329,21 +212,11 @@ void Map::sedFill(std::vector<std::pair<double, double> >& ObsPosition)
 		}
 	}
 
-
-
-	//for (unsigned int i = 0; i < xsize_; ++i)
-	//{
-	//	mask[i][0] = 0;
-	//	mask[i][ysize_ - 1] = 0;
-	//}
-	//for (unsigned int j = 0; j < ysize_; ++j)
-	//{
-	//	mask[0][j] = 0;
-	//	mask[xsize_ - 1][j] = 0;
-	//}
+	// We clear the outer obstacle (if it exists)
 	std::pair<int, int> seed(0, 0);
 	std::vector<std::pair<int, int> > queue;
-	queue.push_back(seed);
+	queue.reserve(nx*ny);
+	queue.emplace_back(seed);
 	while (!queue.empty())
 	{
 		auto cur = queue.back();
@@ -352,16 +225,18 @@ void Map::sedFill(std::vector<std::pair<double, double> >& ObsPosition)
 			&& mask[cur.first][cur.second] >= 254)
 		{
 			mask[cur.first][cur.second] = 0;
-			queue.push_back(std::pair<int, int>(cur.first - 1, cur.second));
-			queue.push_back(std::pair<int, int>(cur.first + 1, cur.second));
-			queue.push_back(std::pair<int, int>(cur.first, cur.second-1));
-			queue.push_back(std::pair<int, int>(cur.first, cur.second+1));
+			if(cur.first-1 >= 0 && mask[cur.first - 1][cur.second] >= 254) 
+				queue.emplace_back(std::pair<int, int>(cur.first - 1, cur.second));
+			if (cur.first +1 <= nx-1 && mask[cur.first + 1][cur.second] >= 254)
+				queue.emplace_back(std::pair<int, int>(cur.first + 1, cur.second));
+			if (cur.second-1 >=0 && mask[cur.first][cur.second - 1] >= 254)
+				queue.emplace_back(std::pair<int, int>(cur.first, cur.second-1));
+			if (cur.second +1 <= ny-1 && mask[cur.first][cur.second + 1] >= 254)
+				queue.emplace_back(std::pair<int, int>(cur.first, cur.second+1));
 		}
 	}
 
-
-
-	// We identify obstacles
+	// We identify internal obstacles
 	for (unsigned int i = 1; i < nx - 1; ++i)
 	{
 		for (unsigned int j = 1; j < ny - 1; ++j)
@@ -373,29 +248,36 @@ void Map::sedFill(std::vector<std::pair<double, double> >& ObsPosition)
 			}
 
 			std::pair<int, int> seed(i, j);
-			// std::cout << "seed: (" << i << ", " << j << "): " << (int)mask[i][j] << std::endl;
 
-			//ObsPosition.push_back(seed);
-			ObsPosition.push_back(std::pair<double, double>(seed.first + 0.5, seed.second + 0.5));
+			obs_.emplace_back(Obs());
+			obs_.back().ObsPosition.first = seed.first + 0.5;
+			obs_.back().ObsPosition.second = seed.second + 0.5;
 
 			// We start a sedFill to eliminate all connected obstacles;
 			std::vector<std::pair<int, int> > queue;
-			queue.push_back(seed);
-			
+			queue.reserve(nx*ny);
+			queue.emplace_back(seed);			
 			while (!queue.empty())
 			{
 				auto cur = queue.back();
-				if (cur.first >= 0 && cur.first < xsize_ && 
-					cur.second >= 0 && cur.second < ysize_ && 
-					mask[cur.first][cur.second] == 254)
+				if (cur.first > 0 && cur.first < xsize_-1 && 
+					cur.second > 0 && cur.second < ysize_-1 && 
+					mask[cur.first][cur.second] >= 254)
 				{
 					mask[cur.first][cur.second] = 0;
 
+					// We store the grids of a connected obstacle (maybe we can develop visibility graph from it)
+					obs_.back().grids_.emplace_back(std::pair<int, int>(cur.first, cur.second));
+
 					queue.pop_back();
-					queue.push_back(std::pair<int, int>(cur.first - 1, cur.second));
-					queue.push_back(std::pair<int, int>(cur.first + 1, cur.second));
-					queue.push_back(std::pair<int, int>(cur.first, cur.second - 1));
-					queue.push_back(std::pair<int, int>(cur.first, cur.second + 1));
+					if(mask[cur.first -1][cur.second] >= 254)
+						queue.emplace_back(std::pair<int, int>(cur.first - 1, cur.second));
+					if (mask[cur.first + 1][cur.second] >= 254)
+						queue.emplace_back(std::pair<int, int>(cur.first + 1, cur.second));
+					if (mask[cur.first][cur.second - 1] >= 254)
+						queue.emplace_back(std::pair<int, int>(cur.first, cur.second - 1));
+					if (mask[cur.first][cur.second + 1] >= 254)
+						queue.emplace_back(std::pair<int, int>(cur.first, cur.second + 1));
 				}
 				else
 				{
@@ -411,7 +293,6 @@ void Map::sedFill(std::vector<std::pair<double, double> >& ObsPosition)
 
 	delete[] mask;
 }
-
 
 float min(float* array,int size) {
 	float min = 10000;
@@ -453,455 +334,233 @@ double max(double* array, int size) {
 	return max;
 }
 
-
-void Map::getCableState(std::vector<double>& obs_list,
-	std::pair<double, double> olds, std::pair<double, double> news)
+bool Map::straightenATwoSegmentCurve(std::vector<double>& old_curve, std::vector<double>& new_curve)
 {
+	// The old curve must have only three elements (i.e., 6 numbers)
+	static double tri_x[3] = {old_curve[0], old_curve[2], old_curve[4]};
+	static double tri_y[3] = {old_curve[1], old_curve[3], old_curve[5]};
+	static double tri[6] = { old_curve[0], old_curve[1], old_curve[2], old_curve[3], old_curve[4], old_curve[5] };
 
-	//std::vector<std::pair<double, double> > tri;
-	static double tri[6];
-	float tri_vertx[3];
-	float tri_verty[3];
-	/*tri.push_back(obs_list.back());
-	tri.push_back(olds);
-	tri.push_back(news);*/
-
-	/*tri[0] = obs_list.back().first;
-	tri[1] = obs_list.back().second;
-	tri[2] = olds.first;
-	tri[3] = olds.second;
-	tri[4] = news.first;
-	tri[5] = news.second;*/
-	int obs_size = obs_list.size();
-	
-	tri_vertx[0] = obs_list[obs_size - 2];
-	tri_vertx[1] = olds.first;
-	tri_vertx[2] = news.first;
-
-	tri_verty[0] = obs_list[obs_size - 1];
-	tri_verty[1] = olds.second;
-	tri_verty[2] = news.second;
-	
-
-	//std::vector<double> result_obs_list;
-
-	//std::vector<std::pair<double, double> > temp_critical_points(critical_points.begin(), critical_points.end());
-
-	int temp_x[1000];
-	int temp_y[1000];
-
-
-
-	// Avoiding insert the last obstacle again
-	/*for (auto iter = temp_critical_points.begin(); iter != temp_critical_points.end(); ++iter)
+	// We need to make sure that the middle obstacle can be straightened
+	int critical_point_index = -1;
+	for (unsigned int i = 0; i < critical_points_.size(); ++i)
 	{
-		if (fabs(iter->first - tri[0].first) < 0.1 && fabs(iter->second - tri[0].second) < 0.1)
+		if (fabs(critical_points_[i].first - tri_x[1]) < 0.25 &&
+			fabs(critical_points_[i].second - tri_y[1]) < 0.25)
 		{
-			iter->first = -1;
-			iter->second = -1;
-			break;
-		}
-	}*/
-
-	//for (int i = 0; i < critical_points.size(); ++i)
-	//{
-	//	temp_x[i] = critical_points[i].first;
-	//	temp_y[i] = critical_points[i].second;
-	//	if (fabs(temp_x[i] - tri_vertx[0]) < 0.1 && fabs(temp_y[i] - tri_verty[0]) < 0.1)
-	//	{
-	//		temp_x[i] = -1;
-	//		temp_y[i] = -1;
-	//		break;
-	//	}
-
-	//}
-
-	// 2022.08.29 YT: We use memcpy
-	memcpy(temp_x, critical_points_x_, sizeof(int)*critical_points_num_);
-	memcpy(temp_y, critical_points_y_, sizeof(int)*critical_points_num_);
-	int int_tri_vertx_0 = (int)(tri_vertx[0]);
-	int int_tri_verty_0 = (int)(tri_verty[0]);
-	for (unsigned int i = 0; i < critical_points_num_; ++i)
-	{
-		if (temp_x[i] == int_tri_vertx_0 && temp_y[i] == int_tri_verty_0)
-		{
-			temp_x[i] = -1;
-			temp_y[i] = -1;
+			critical_point_index = i;
 			break;
 		}
 	}
-
-	//std::vector<bool> in_or_on;
-
-	static bool in_or_on[1000];
-	int n = critical_points.size();
-
-
-	/*std::vector<float> vertx;
-	std::vector<float> verty;
-
-	for (auto iter = tri.begin(); iter != tri.end(); ++iter)
+	if (critical_point_index != -1)
 	{
-		vertx.push_back(iter->first);
-		verty.push_back(iter->second);
-	}*/
-
-	//bool Map::pnpoly(int nvert, float *vertx, float *verty, float testx, float testy)
-
-	float min_tri_x = min(tri_vertx, 3);
-	float min_tri_y = min(tri_verty, 3);
-	float max_tri_x = max(tri_vertx, 3);
-	float max_tri_y = max(tri_verty, 3);
-	//in_or_on.resize(temp_critical_points.size(),false);
-
-	/*for (auto iter = temp_critical_points.begin(); iter != temp_critical_points.end(); ++iter)
-	{
-		if (iter->first > max_tri_x || iter->first<min_tri_x || iter->second>max_tri_y || iter->second < min_tri_y) {
-			in_or_on.push_back(false);
-		}
-		else {
-			in_or_on.push_back(pnpoly(tri.size(), &(vertx[0]), &(verty[0]), iter->first, iter->second));
-		}
-	}*/
-
-	for (int i = 0; i < n; ++i)
-	{
-		if (temp_x[i] > max_tri_x || temp_x[i]<min_tri_x || temp_y[i]>max_tri_y || temp_y[i] < min_tri_y) {
-			in_or_on[i] = (false);
-		}
-		else {
-			//in_or_on[i] = (pnpoly(3, &(vertx[0]), &(verty[0]), temp_x[i], temp_y[i]));
-			in_or_on[i] = (pnpoly(3, tri_vertx, tri_verty, temp_x[i], temp_y[i]));
-		}
-	}
-
-
-	bool any_in_or_on = false;
-	//std::vector<Eigen::Vector2f> corner_list;
-	//for (int i = 0; i < tri.size(); i++) {
-	//	bool In = pnpoly(temp_critical_points, tri[i](0), tri[i](1));
-	//	if (In) {
-	//		in_flag = false;
-	//		Eigen::Vector2f pos;
-	//		pos << temp_critical_points[i](0), temp_critical_points[i](1);
-	//		corner_list.push_back(pos);
-	//	}
-
-	//}
-
-	for (int i = 0; i < n; i++)
-	{
-		if (in_or_on[i])
+		double inside_ori = critical_points_orientation[critical_point_index];
+		double pre_dis = sqrt((tri_x[0] - tri_x[1])*(tri_x[0] - tri_x[1]) + (tri_y[0] - tri_y[1])*(tri_y[0] - tri_y[1]));
+		double post_dis = sqrt((tri_x[2] - tri_x[1])*(tri_x[2] - tri_x[1]) + (tri_y[2] - tri_y[1])*(tri_y[2] - tri_y[1]));
+		std::pair<double, double> stretch_pre_dir((tri_x[0] - tri_x[1]) / pre_dis, (tri_y[0] - tri_y[1]) / pre_dis);
+		std::pair<double, double> stretch_post_dir((tri_x[2] - tri_x[1]) / post_dis, (tri_y[2] - tri_y[1]) / post_dis);
+		std::pair<double, double> stretch_dir(stretch_pre_dir.first + stretch_post_dir.first, stretch_pre_dir.second + stretch_post_dir.second);
+		if (stretch_dir.first*cos(inside_ori) + stretch_dir.second*sin(inside_ori) > 0)
 		{
-			any_in_or_on = true;
-			break;
+			// cannot stretch. we just return the same tether
+			new_curve = old_curve;
+			return true;
 		}
 	}
 
+	// We calculate the boundary orientations
+	double pre_theta = atan2(tri_y[1] - tri_y[0], tri_x[1] - tri_x[0]);
+	double post_theta = atan2(tri_y[2] - tri_y[0], tri_x[2] - tri_x[0]);
+	double d_theta = normalize_angle(post_theta - pre_theta);
 
-	if (!any_in_or_on) {
-		//remove obstacle
-		//result_obs_list = tryRemoveObstacles(obs_list, news);
-		obs_list = tryRemoveObstacles(obs_list, news);
+	// We check whether there exist obstacle vertices that are in the triangle
+	std::vector<double> in_or_on_theta;
+	in_or_on_theta.reserve(critical_points_.size());
+	std::vector<std::pair<double, double> > in_or_on_obs_list;
+	in_or_on_obs_list.reserve(critical_points_.size());
+	for (auto iter = critical_points_.begin(); iter != critical_points_.end(); ++iter)
+	{
+		if (isPointInOrOnTri(&(tri[0]), iter->first, iter->second))
+		{
+			// Here we need to remove the three vertices of the triangle (if they are not in then better)
+			if (isTriVertex(&(tri[0]), iter->first, iter->second))
+			{
+				continue;
+			}
+			double the_theta = atan2(iter->second - tri[1], iter->first - tri[0]);
+			the_theta = pre_theta + normalize_angle(the_theta - pre_theta);
+			in_or_on_theta.emplace_back(the_theta);
+			in_or_on_obs_list.emplace_back(*iter);
+		}
+	}
+
+	new_curve.clear();
+	if (in_or_on_theta.empty())
+	{
+		// There is no need to keep three vertices. We just remove the middle one
+		new_curve = { old_curve[0], old_curve[1], old_curve[4], old_curve[5] };
+		return true;
 	}
 	else
 	{
-		double pre_theta = atan2(tri_verty[1] - tri_verty[0], tri_vertx[1] - tri_vertx[0]);
+		// We have to detemine which obstacle vertex is to be contacted NEXT
+		// If there is only one internal point, we just choose it
+		double min_index = 0;
+		double min_dis = sqrt((tri[0] - in_or_on_obs_list[min_index].first)*(tri[0] - in_or_on_obs_list[min_index].first)
+			+ (tri[1] - in_or_on_obs_list[min_index].second)*(tri[1] - in_or_on_obs_list[min_index].second));
+		double min_theta = in_or_on_theta[0];
 
-		std::pair<double, double> temp_point;
-		std::vector<std::pair<double, double> > corners;
-		for (unsigned int i = 0; i < n; ++i)
+		// If there are multiple internal points, we have to choose one
+		if (in_or_on_theta.size() > 1)
 		{
-			if (in_or_on[i])
+			if (d_theta > 0)
 			{
-				temp_point.first = temp_x[i];
-				temp_point.second = temp_y[i];
-				corners.push_back(temp_point);
+				for (unsigned int i = 1; i < in_or_on_theta.size(); ++i)
+				{
+					double the_theta = in_or_on_theta[i];
+					if (the_theta > min_theta + SEFTPP_EPS)
+					{
+						continue;
+					}
+					else if (the_theta < min_theta - SEFTPP_EPS)
+					{
+						min_index = i;
+						min_theta = the_theta;
+						min_dis = sqrt((tri[0] - in_or_on_obs_list[min_index].first)*(tri[0] - in_or_on_obs_list[min_index].first)
+							+ (tri[1] - in_or_on_obs_list[min_index].second)*(tri[1] - in_or_on_obs_list[min_index].second));
+					}
+					else
+					{
+						// Maybe multiple vertices are colinear. So we have to choose the nearest one
+						double the_dis = sqrt((tri[0] - in_or_on_obs_list[i].first)*(tri[0] - in_or_on_obs_list[i].first)
+							+ (tri[1] - in_or_on_obs_list[i].second)*(tri[1] - in_or_on_obs_list[i].second));
+						if (the_dis < min_dis - SEFTPP_EPS)
+						{
+							min_index = i;
+							min_theta = the_theta;
+							min_dis = sqrt((tri[0] - in_or_on_obs_list[min_index].first)*(tri[0] - in_or_on_obs_list[min_index].first)
+								+ (tri[1] - in_or_on_obs_list[min_index].second)*(tri[1] - in_or_on_obs_list[min_index].second));
+						}
+					}
+				}
 			}
-		}
-
-		// We find the corner with least angle diff
-		std::vector<std::pair<double, double> > diff(corners.begin(), corners.end());
-		std::vector<double> theta;
-		std::vector<double> temp_theta;
-		for (auto iter = diff.begin(); iter != diff.end(); ++iter)
-		{
-			iter->first -= tri_vertx[0];
-			iter->second -= tri_verty[0];
-			theta.push_back(atan2(iter->second, iter->first));
-			temp_theta.push_back(fabs(normalize_angle(theta.back() - pre_theta)));
-		}
-
-		// Find min_theta, and all corners that have min_theta
-		double min_theta = temp_theta[0];
-		std::vector<std::pair<double, double> > corner;
-		//corner.push_back(corners[0]);
-
-		for (int i = 0; i < temp_theta.size(); i++) {
-			if (temp_theta[i] < min_theta) {
-				corner.clear();
-				corner.push_back(corners[i]);
-				min_theta = temp_theta[i];
-			}
-			else if (temp_theta[i] == min_theta)
+			else // d_theta < 0
 			{
-				corner.push_back(corners[i]);
+				for (unsigned int i = 1; i < in_or_on_theta.size(); ++i)
+				{
+					double the_theta = in_or_on_theta[i];
+					if (the_theta < min_theta - SEFTPP_EPS)
+					{
+						continue;
+					}
+					else if (the_theta < min_theta + SEFTPP_EPS)
+					{
+						min_index = i;
+						min_theta = the_theta;
+						min_dis = sqrt((tri[0] - in_or_on_obs_list[min_index].first)*(tri[0] - in_or_on_obs_list[min_index].first)
+							+ (tri[1] - in_or_on_obs_list[min_index].second)*(tri[1] - in_or_on_obs_list[min_index].second));
+					}
+					else
+					{
+						// Maybe multiple vertices are colinear. So we have to choose the nearest one
+						double the_dis = sqrt((tri[0] - in_or_on_obs_list[i].first)*(tri[0] - in_or_on_obs_list[i].first)
+							+ (tri[1] - in_or_on_obs_list[i].second)*(tri[1] - in_or_on_obs_list[i].second));
+						if (the_dis < min_dis - SEFTPP_EPS)
+						{
+							min_index = i;
+							min_theta = the_theta;
+							min_dis = sqrt((tri[0] - in_or_on_obs_list[min_index].first)*(tri[0] - in_or_on_obs_list[min_index].first)
+								+ (tri[1] - in_or_on_obs_list[min_index].second)*(tri[1] - in_or_on_obs_list[min_index].second));
+						}
+					}
+				}
 			}
-		}
+		}// end if there are multiple internal points. We've chosen the next tether-obstacle contact point
 
-		// If there are multiple least-angle-diff corners, we choose the nearest one
-		std::pair<double, double> single_corner;
-		if (corner.size() == 1)
+		new_curve = { old_curve[0], old_curve[1] };
+		std::vector<double> temp_old_curve = { in_or_on_obs_list[min_index].first, in_or_on_obs_list[min_index].second,
+			old_curve[2], old_curve[3], old_curve[4], old_curve[5] };
+
+		std::vector<double> temp_new_curve;
+		straightenATwoSegmentCurve(temp_old_curve, temp_new_curve);
+		new_curve.insert(new_curve.end(), temp_new_curve.begin(), temp_new_curve.end());
+		return false;
+	}
+}
+
+void Map::deformTether(const std::vector<double>& old_tether_shape,
+	std::vector<double>& new_tether_shape)
+{
+	// The input contains the location of the robot's S position. 
+
+	new_tether_shape.clear();
+	new_tether_shape.reserve(old_tether_shape.size() + 10);
+	new_tether_shape = old_tether_shape;
+
+	if (old_tether_shape.size() <= 4)
+	{
+		return ;
+	}
+
+	int n = new_tether_shape.size();
+	int i = n - 6;
+	while (1)
+	{
+		std::vector<double> old_part_tether(new_tether_shape.begin() + i, new_tether_shape.begin() + i + 6);
+		std::vector<double> new_part_tether;
+
+		bool b = straightenATwoSegmentCurve(old_part_tether, new_part_tether);
+		// the new part tether is just removing the middle obstacle point
+		// or the tether is not changed
+		// then b is true
+		if (b && new_part_tether.size() == 4)
 		{
-			single_corner = corner[0];
+			new_tether_shape.erase(new_tether_shape.begin() + i + 3);
+			new_tether_shape.erase(new_tether_shape.begin() + i + 2);
+			n = new_tether_shape.size();
+			i = std::min(i - 2, n - 6);
+			if (i < 0)
+				break;
+		}
+		else if (b && new_part_tether.size() == 6)
+		{
+			n = new_tether_shape.size();
+			i = std::min(i - 2, n - 6);
+			if (i < 0)
+				break;
 		}
 		else
 		{
-//			std::vector<double> dis;
-			double dx = corner[0].first - tri_vertx[0];
-			double dy = corner[0].second - tri_verty[0];
-			double min_dis = sqrt(dx*dx + dy * dy);
-			single_corner = corner[0];
-			for (auto iter = corner.begin(); iter != corner.end(); ++iter)
-			{
-				dx = iter->first - tri_vertx[0];
-				dy = iter->second - tri_verty[0];
-				double new_dis = sqrt(dx*dx + dy * dy);
-				if (new_dis < min_dis)
-				{
-					min_dis = new_dis;
-					single_corner = *iter;
-				}
-			}
+			// The tether encounters new obstacles. We should add them
+			new_tether_shape.erase(new_tether_shape.begin() + i, new_tether_shape.begin() + i + 6);
+			new_tether_shape.insert(new_tether_shape.begin() + i, new_part_tether.begin(), new_part_tether.end());
+			n = new_tether_shape.size();
+
+			i = std::min((int)(i + new_part_tether.size()), n - 6);
+			if (i < 0)
+				break;
 		}
-
-		//result_obs_list.reserve(obs_list.size() + 10);
-		//result_obs_list.clear();
-		//result_obs_list.insert(result_obs_list.begin(), obs_list.begin(), obs_list.end());
-		//result_obs_list.push_back(single_corner.first);
-		//result_obs_list.push_back(single_corner.second);
-		obs_list.push_back(single_corner.first);
-		obs_list.push_back(single_corner.second);
-
-
-		//result_obs_list = getCableState(result_obs_list, olds, news);
-		//getCableState(result_obs_list, olds, news);
-		getCableState(obs_list, olds, news);
-
 	}
+}
 
-	//return result_obs_list;
-	return;
+void Map::newGetCableState(std::vector<double>& old_tether_shape,
+	std::pair<double, double> olds, std::pair<double, double> news)
+{
+	std::vector<double> result_tether;
+	old_tether_shape.emplace_back(olds.first);
+	old_tether_shape.emplace_back(olds.second);
+	old_tether_shape.emplace_back(news.first);
+	old_tether_shape.emplace_back(news.second);
+	deformTether(old_tether_shape, result_tether);
+	old_tether_shape.assign(result_tether.begin(), result_tether.end());
 }
 
 void Map::init_footprint()
-//void Map::init_footprint(std::vector<double> f_x, std::vector<double> f_y)
 {
-//	for (unsigned int i = 0; i < f_x.size(); ++i)
 	for(auto iter = footprint_.begin(); iter != footprint_.end(); ++iter)
 	{
-		//double r = sqrt(f_x[i] * f_x[i] + f_y[i] * f_y[i]);
-		//double theta = atan2(f_y[i], f_x[i]);
 		double r = sqrt(iter->first*iter->first + iter->second*iter->second);
 		double theta = atan2(iter->second, iter->first);
-		polar_footprint_.push_back(std::pair<double, double>(r, theta));
+		polar_footprint_.emplace_back(std::pair<double, double>(r, theta));
 	}
 }
-
-std::vector<double> Map::tryRemoveObstacles(std::vector<double> obs_list, std::pair<double, double> news)
-{
-	std::vector<double> result_obs_list(obs_list.begin(), obs_list.end());
-
-	if (obs_list.size() < 4)
-	{
-		return result_obs_list;
-	}
-
-	std::vector<double> tri;
-
-	int n = obs_list.size();
-	tri.push_back(obs_list[n - 4]);
-	tri.push_back(obs_list[n - 3]);
-	tri.push_back(obs_list[n - 2]);
-	tri.push_back(obs_list[n - 1]);
-
-	tri.push_back(news.first);
-	tri.push_back(news.second);
-
-
-	//std::vector<std::pair<int, int> > result;
-	//newbresenham(tri[0], tri[1], tri[4], tri[5], result);
-	//for (int i = 0; i < result.size(); i++) {
-	//	if (data_[result[i].second * xsize_ + result[i].first] != 0) {
-	//		return obs_list;
-	//	}
-	//}
-
-	//// 2022.08.29 YT: we use std::vector<int> bresenham
-	//std::vector<int> result;
-	//newbresenham(tri[0], tri[1], tri[4], tri[5], xsize_, result);
-	//for (int i = 0; i < result.size(); i++) {
-	//	if (data_[result[i]] != 0) {
-	//		return obs_list;
-	//	}
-	//}
-
-	//%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-	double pre_theta = atan2(tri[3] - tri[1], tri[2] - tri[0]);
-	//	pre_theta = atan2(tri(2, 2) - tri(1, 2), tri(2, 1) - tri(1, 1));
-	double post_theta = atan2(tri[5] - tri[3], tri[4] - tri[2]);
-	//post_theta = atan2(tri(3, 2) - tri(2, 2), tri(3, 1) - tri(2, 1));
-	double d_theta = normalize_angle(post_theta - pre_theta);
-	//d_theta = wrapToPi(post_theta - pre_theta);
-	double test_theta;
-	if (d_theta < 0)
-		//if d_theta < 0
-		test_theta = pre_theta - M_PI / 2;
-	//	test_theta = pre_theta - pi / 2;
-	//else
-	else
-		//	test_theta = pre_theta + pi / 2;
-		test_theta = pre_theta + M_PI / 2;
-	//end
-
-	int loc = std::find_if(critical_points.begin(), critical_points.end(),
-		[&](const auto& a) {return a.first == tri[2] && a.second == tri[3]; }) - critical_points.begin();
-	//	temp = critical_points(:, 1) == tri(2, 1);
-	//if any(temp)
-	//	temp = temp & critical_points(:, 2) == tri(2, 2);
-	//if any(temp)
-	//	loc = find(temp);
-	//obs_theta = critical_points_orientation(loc);
-	//end
-	//	end
-
-	double obs_theta = critical_points_orientation[loc];
-
-	double result_theta = fabs(normalize_angle(test_theta - obs_theta));
-	//	result_theta = abs(wrapToPi(test_theta - obs_theta));
-	if (result_theta < M_PI / 2)
-		//if result_theta < pi / 2
-		return result_obs_list;
-	//	return;
-	//end
-
-	//	%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-
-	//std::vector<std::pair<double, double>> temp_critical_points = critical_points;
-
-	int temp_x[1000];
-	int temp_y[1000];
-
-	// Avoiding insert the obstacle again
-	//for (int i = 0; i < critical_points.size(); i++) {
-	//	if (critical_points[i].first == tri[0].first) {
-	//		if (critical_points[i].second == tri[0].second)
-	//			temp_critical_points[i].first = -1;
-	//		temp_critical_points[i].second = -1;
-	//	}
-
-	//}
-	/*for (auto iter = critical_points.begin(); iter != critical_points.end(); ++iter)
-	{
-		if (fabs(iter->first - tri[0].first) < 0.1 && fabs(iter->second - tri[0].second) < 0.1)
-		{
-			temp_x = -1;
-			iter->second = -1;
-		}
-		if (fabs(iter->first - tri[1].first) < 0.1 && fabs(iter->second - tri[1].second) < 0.1)
-		{
-			iter->first = -1;
-			iter->second = -1;
-		}
-	}*/
-
-	for (int i = 0; i < critical_points.size(); i++) {
-		temp_x[i] = round(critical_points[i].first);
-		temp_y[i] = round(critical_points[i].second);
-		//x0 y0
-		if (fabs(critical_points[i].first - tri[0]) < 0.1&& fabs(critical_points[i].second - tri[1]) < 0.1) {
-			temp_x[i] = -1;
-			temp_y[i] = -1;
-		}
-
-		//x1 y1
-
-		if (fabs(critical_points[i].first - tri[2]) < 0.1&& fabs(critical_points[i].second - tri[3]) < 0.1) {
-			temp_x[i] = -1;
-			temp_y[i] = -1;
-		}
-	}
-
-
-	//std::vector<bool> in_or_on;
-	std::vector<float> vertx;
-	std::vector<float> verty;
-
-	static bool in_or_on[1000];
-	int size = critical_points.size();
-	/*for (auto iter = tri.begin(); iter != tri.end(); ++iter)
-	{
-		vertx.push_back(iter->first);
-		verty.push_back(iter->second);
-	}*/
-
-	for (int i = 0; i < 3; i++) {
-		vertx.push_back(tri[2 * i]);
-		verty.push_back(tri[2 * i+1]);
-	}
-
-	//bool Map::pnpoly(int nvert, float *vertx, float *verty, float testx, float testy)
-
-
-	float min_tri_x = min(&(vertx[0]), vertx.size());
-	float min_tri_y = min(&(verty[0]), verty.size());
-	float max_tri_x = max(&(vertx[0]), vertx.size());
-	float max_tri_y = max(&(verty[0]), verty.size());
-	//in_or_on.resize(temp_critical_points.size(),false);
-
-
-	for (int i = 0; i < size; ++i)
-	{
-		if (temp_x[i] > max_tri_x || temp_x[i]<min_tri_x || temp_y[i]>max_tri_y || temp_y[i] < min_tri_y) {
-			in_or_on[i] = (false);
-		}
-		else {
-			in_or_on[i] = (pnpoly(tri.size(), &(vertx[0]), &(verty[0]), temp_x[i], temp_y[i]));
-		}
-	}
-
-
-	bool any_in_or_on = false;
-
-	//for (int i = 0; i < tri.size(); i++) {
-	//	bool In = pnpoly(temp_critical_points, tri[0].first, tri[0].second);
-	//	if (In) {
-	//		in_flag = false;
-	//		break;
-	//	}
-
-	//}
-
-	for (int i = 0; i < size; i++)
-	{
-		if (in_or_on[i])
-		{
-			any_in_or_on = true;
-			break;
-		}
-	}
-
-
-	if (!any_in_or_on) {
-		result_obs_list.pop_back();
-		result_obs_list.pop_back();
-
-		result_obs_list = tryRemoveObstacles(result_obs_list, news);
-	}
-
-	return result_obs_list;
-}
-
-
-

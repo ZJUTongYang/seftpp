@@ -2,12 +2,9 @@
 #include <vector>
 #include <queue>
 #include "map.h"
-#include "solver.h"
+#include "definitions.h"
 
 #include <opencv2/opencv.hpp>
-
-
-
 
 double normalize_angle(const double angle)
 {
@@ -23,767 +20,55 @@ double normalize_angle_positive(const double angle)
 	return result;
 }
 
-    std::vector<std::pair<double, double> >  Map::polarRotateAndMoveToXy(double x, double y, double theta)
-    {
-        std::vector<std::pair<double, double> > after_polar(polar_footprint_.begin(), polar_footprint_.end());
-        for(unsigned int i = 0; i < after_polar.size(); ++i)
-        {
-            after_polar[i].second += theta;
-        }
+double crossProduct2D(const std::pair<double, double>& a, const std::pair<double, double>& b)
+{
+	return a.first*b.second - a.second*b.first;
+}
 
-        std::vector<std::pair<double, double> > footprint(after_polar.begin(), after_polar.end());
-        for(unsigned int i = 0; i < after_polar.size(); ++i)
-        {
-            footprint[i].first = after_polar[i].first * cos(after_polar[i].second) + x;
-            footprint[i].second = after_polar[i].first * sin(after_polar[i].second) + y;
-        }
-        return footprint;
+bool isTriVertex(const double* tri, const double& px, const double& py)
+{
+	if (fabs(tri[0] - px) < 0.5 && fabs(tri[1] - py) < 0.5)
+		return true;
+	if (fabs(tri[2] - px) < 0.5 && fabs(tri[3] - py) < 0.5)
+		return true;
+	if (fabs(tri[4] - px) < 0.5 && fabs(tri[5] - py) < 0.5)
+		return true;
+	return false;
+}
 
-    }
+bool isPointInOrOnTri(const double* tri, const double& px, const double& py)
+{
+	std::pair<double, double> ab(tri[2] - tri[0], tri[3] - tri[1]),
+		bc(tri[4] - tri[2], tri[5] - tri[3]), ca(tri[0] - tri[4], tri[1] - tri[5]),
+		ap(px - tri[0], py - tri[1]), bp(px - tri[2], py - tri[3]), cp(px - tri[4], py - tri[5]);
+	double cross0 = crossProduct2D(ab, ap), cross1 = crossProduct2D(bc, bp), cross2 = crossProduct2D(ca, cp);
 
-    std::pair<double, double>  Map::polarRotateAndMoveS(double x, double y, double theta)
-    {
-        std::pair<double, double> after_polar = polar_footprint_[0];
+	return (cross0 >= 0 && cross1 >= 0 && cross2 >= 0) || (cross0 <= 0 && cross1 <= 0 && cross2 <= 0);
+}
 
-        after_polar.second += theta;
-
-        std::pair<double, double> footprint;
-
-        footprint.first = after_polar.first * cos(after_polar.second) + x;
-        footprint.second = after_polar.first * sin(after_polar.second) + y;
-
-        return footprint;
-
-    }
-
-	bool pnpoly(int nvert, float *vertx, float *verty, float testx, float testy)
-	{
-		int i, j;
-		bool c = false;
-		for (i = 0, j = nvert - 1; i < nvert; j = i++) {
-			if (((verty[i] > testy) != (verty[j] > testy)) &&
-				(testx < (vertx[j] - vertx[i]) * (testy - verty[i]) / (verty[j] - verty[i]) + vertx[i]))
-				c = !c;
-		}
-		return c;
+bool pnpoly(int nvert, double *vertx, double *verty, double testx, double testy)
+{
+	int i, j;
+	bool c = false;
+	for (i = 0, j = nvert - 1; i < nvert; j = i++) {
+		if (((verty[i] > testy) != (verty[j] > testy)) &&
+			(testx < (vertx[j] - vertx[i]) * (testy - verty[i]) / (verty[j] - verty[i]) + vertx[i]))
+			c = !c;
 	}
+	return c;
+}
    
-    int sign(float x){
-        if(x>0){
-            return 1;
-        }
-        else if(x<0){
-            return -1;
-        }
-        else{
-            return 0;
-        }
+int sign(float x){
+    if(x>0){
+        return 1;
     }
-
-
-	void newbresenham(double x1, double y1, double x2, double y2, int xsize, std::vector<int>& result)
-	{
-		std::vector<std::pair<int, int> > temp_result;
-		newbresenham(x1, y1, x2, y2, temp_result);
-		result.clear();
-		for (auto iter = temp_result.begin(); iter != temp_result.end(); ++iter)
-		{
-			result.push_back(iter->second*xsize + iter->first);
-		}
-
-	}
-
-
-	//void newbresenham(double x1, double y1, double x2, double y2, int xsize, std::vector<int>& result) {
-	//	// std::vector<std::pair<int, int> > result;
-	//	result.clear();
-
-	//	int floorx1 = floor(x1);
-	//	int floorx2 = floor(x2);
-	//	int floory1 = floor(y1);
-	//	int floory2 = floor(y2);
-
-	//	result.reserve(abs(floorx2 - floorx1) + 1 + abs(floory2 - floory1) + 1);
-
-	//	// if they lie vertically (one above another), we cannot calculate k
-	//	// so we direct solve this case
-	//	if (floorx1 == floorx2)
-	//	{
-	//		// std::vector<int> L = intelist(y1, y2);
-	//		if (floory1 < floory2)
-	//		{
-	//			for (int i = floory1; i <= floory2; ++i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(floorx1, i));
-	//				result.push_back(i*xsize + floorx1);
-	//			}
-	//		}
-	//		else if (floory1 == floory2)
-	//		{
-	//			//result.push_back(std::pair<int, int>(floorx1, floory1));
-	//			result.push_back(floory1*xsize + floorx1);
-	//		}
-	//		else
-	//		{
-	//			for (int i = floory1; i >= floory2; --i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(floorx1, i));
-	//				result.push_back(i*xsize + floorx1);
-	//			}
-	//		}
-	//		return;
-	//	}
-
-	//	if (floory1 == floory2)
-	//	{
-	//		if (floorx1 < floorx2)
-	//		{
-	//			for (int i = floorx1; i <= floorx2; ++i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(i, floory1));
-	//				result.push_back(floory1*xsize + i);
-	//			}
-	//		}
-	//		else if (floorx1 == floorx2)
-	//		{
-	//			//result.push_back(std::pair<int, int>(floorx1, floory1));
-	//			result.push_back(floory1*xsize + floorx1);
-	//		}
-	//		else
-	//		{
-	//			for (int i = floorx1; i >= floorx2; --i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(i, floory1));
-	//				result.push_back(floory1*xsize + i);
-	//			}
-	//		}
-	//		return;
-	//	}
-
-	//	// we get the function of the ray in y=kx+b
-	//	double k = (y2 - y1) / (x2 - x1);
-	//	double b = y1 - k * x1;
-
-	//	int flag;
-
-
-	//	std::vector<std::pair<int, int> > v;
-	//	//v.reserve(abs(floorx2 - floorx1));
-	//	v.resize(abs(floorx2 - floorx1));
-	//	int count = 0;
-	//	if (x1 < x2)
-	//	{
-	//		flag = 1;
-	//		for (int i = floorx1 + 1; i <= floorx2; ++i)
-	//		{
-	//			//v.push_back(std::pair<int, int>(i, floor(k*i + b)));
-	//			v[count++] = std::pair<int, int>(i, floor(k*i + b));
-	//		}
-	//	}
-	//	else
-	//	{
-	//		flag = -1;
-	//		for (int i = floorx1; i >= floorx2 + 1; --i)
-	//		{
-	//			//v.push_back(std::pair<int, int>(i, floor(k*i + b)));
-	//			v[count++] = std::pair<int, int>(i, floor(k*i + b));
-	//		}
-	//	}
-
-	//	int temp = sign(k)*flag;
-
-	//	if (floorx2 > floorx1)
-	//	{
-	//		// we insert the start column
-	//		if (floory1 < v.front().second)
-	//		{
-	//			for (int i = floory1; i <= v.front().second; ++i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(floorx1, i));
-	//				result.push_back(i*xsize + floorx1);
-	//			}
-	//		}
-	//		else
-	//		{
-	//			for (int i = floory1; i >= v.front().second; --i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(floorx1, i));
-	//				result.push_back(i*xsize + floorx1);
-	//			}
-	//		}
-
-	//		// we insert the intermediate column
-	//		if (abs(floorx2 - floorx1) > 1)
-	//		{
-
-	//			// if the ray only passes two columns, then there is no intermediate columns
-	//			for (unsigned int i = 0; i < v.size() - 1; ++i)
-	//			{
-	//				int xinsert = v[i].first;
-	//				int ystart = v[i].second;
-	//				int yend = v[i + 1].second;
-	//				if (ystart < yend)
-	//				{
-	//					for (int j = ystart; j <= yend; ++j)
-	//					{
-	//						//result.push_back(std::pair<int, int>(xinsert, j));
-	//						result.push_back(j*xsize + xinsert);
-	//					}
-	//				}
-	//				else
-	//				{
-	//					for (int j = ystart; j >= yend; --j)
-	//					{
-	//						//result.push_back(std::pair<int, int>(xinsert, j));
-	//						result.push_back(j*xsize + xinsert);
-	//					}
-	//				}
-	//			}
-
-	//		}
-
-	//		// we insert the final column
-	//		if (floory2 > v.back().second)
-	//		{
-	//			int xinsert = v.back().first;
-	//			for (int i = v.back().second; i <= floory2; ++i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(xinsert, i));
-	//				result.push_back(i*xsize + xinsert);
-	//			}
-	//		}
-	//		else
-	//		{
-	//			int xinsert = v.back().first;
-	//			for (int i = v.back().second; i >= floory2; --i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(xinsert, i));
-	//				result.push_back(i*xsize + xinsert);
-	//			}
-	//		}
-
-	//	}//floorx2 > floorx1
-	//	else // floorx1 is greater than floorx2. We do things backwards
-	//	{
-	//		int xinsert = v.front().first;
-	//		// we insert the start column
-	//		if (floory1 < v.front().second)
-	//		{
-	//			for (int i = floory1; i <= v.front().second; ++i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(xinsert, i));
-	//				result.push_back(i*xsize + xinsert);
-	//			}
-	//		}
-	//		else
-	//		{
-	//			for (int i = floory1; i >= v.front().second; --i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(xinsert, i));
-	//				result.push_back(i*xsize + xinsert);
-	//			}
-	//		}
-
-	//		// we insert the intermediate column
-	//		if (abs(floorx2 - floorx1) > 1)
-	//		{
-
-	//			// if the ray only passes two columns, then there is no intermediate columns
-	//			for (unsigned int i = 0; i < v.size() - 1; ++i)
-	//			{
-	//				int xinsert = v[i + 1].first;//Here is different
-	//				int ystart = v[i].second;
-	//				int yend = v[i + 1].second;
-	//				if (ystart < yend)
-	//				{
-	//					for (int j = ystart; j <= yend; ++j)
-	//					{
-	//						//result.push_back(std::pair<int, int>(xinsert, j));
-	//						result.push_back(j*xsize + xinsert);
-	//					}
-	//				}
-	//				else
-	//				{
-	//					for (int j = ystart; j >= yend; --j)
-	//					{
-	//						//result.push_back(std::pair<int, int>(xinsert, j));
-	//						result.push_back(j*xsize + xinsert);
-	//					}
-	//				}
-	//			}
-
-	//		}
-
-	//		// we insert the final column
-	//		if (floory2 > v.back().second)
-	//		{
-	//			// int xinsert = v.back().first;
-	//			for (int i = v.back().second; i <= floory2; ++i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(floorx2, i));
-	//				result.push_back(i*xsize + floorx2);
-	//			}
-	//		}
-	//		else
-	//		{
-	//			// int xinsert = v.back().first;
-	//			for (int i = v.back().second; i >= floory2; --i)
-	//			{
-	//				//result.push_back(std::pair<int, int>(floorx2, i));
-	//				result.push_back(i*xsize + floorx2);
-	//			}
-	//		}
-	//	}//floorx2 < floorx1
-	//}
-
-
-
-
-
-    void newbresenham(double x1, double y1, double x2, double y2, std::vector<std::pair<int, int> >& result){
-	// std::vector<std::pair<int, int> > result;
-	result.clear();
-
-	int floorx1 = floor(x1);
-	int floorx2 = floor(x2);
-	int floory1 = floor(y1);
-	int floory2 = floor(y2);
-
-    result.reserve(abs(floorx2 - floorx1) + 1 + abs(floory2 - floory1) + 1);
-
-	// if they lie vertically (one above another), we cannot calculate k
-	// so we direct solve this case
-	if(floorx1 == floorx2)
-	{
-		// std::vector<int> L = intelist(y1, y2);
-        if(floory1 < floory2)
-        {
-            for(int i = floory1; i <= floory2; ++i)
-            {
-                result.push_back(std::pair<int, int>(floorx1, i));
-            }
-        }
-        else if(floory1 == floory2)
-        {
-            result.push_back(std::pair<int, int>(floorx1, floory1));
-        }
-        else
-        {
-            for(int i = floory1; i >= floory2; --i)
-            {
-                result.push_back(std::pair<int, int>(floorx1, i));
-            }
-        }
-        return ;
-	}
-
-    if(floory1 == floory2)
-    {
-        if(floorx1 < floorx2)
-        {
-            for(int i = floorx1; i <= floorx2; ++i)
-            {
-                result.push_back(std::pair<int, int>(i, floory1));
-            }
-        }
-        else if(floorx1 == floorx2)
-        {
-            result.push_back(std::pair<int, int>(floorx1, floory1));
-        }
-        else
-        {
-            for(int i = floorx1; i >= floorx2; --i)
-            {
-                result.push_back(std::pair<int, int>(i, floory1));
-            }
-        }
-        return ;
+    else if(x<0){
+        return -1;
     }
-
-    // we get the function of the ray in y=kx+b
-	double k = (y2 - y1)/(x2 - x1);
-	double b = y1 - k*x1;
-
-    int flag;
-    
-
-    std::vector<std::pair<int, int> > v;
-    v.reserve(abs(floorx2 - floorx1));
-    if(x1 < x2)
-    {
-        flag = 1;
-        for(int i = floorx1+1; i <= floorx2; ++i)
-        {
-            v.push_back(std::pair<int, int>(i, floor(k*i+b)));
-        }
+    else{
+        return 0;
     }
-    else
-    {
-        flag = -1;
-        for(int i = floorx1; i >= floorx2 + 1; --i)
-        {
-            v.push_back(std::pair<int, int>(i, floor(k*i+b)));
-        }
-    }
-    
-    int temp = sign(k)*flag;
-
-    if(floorx2 > floorx1)
-    {
-        // we insert the start column
-        if(floory1 < v.front().second)
-        {
-            for(int i = floory1; i <= v.front().second; ++i)
-            {
-                result.push_back(std::pair<int, int>(floorx1, i));
-            }
-        }
-        else
-        {
-            for(int i = floory1; i >= v.front().second; --i)
-            {
-                result.push_back(std::pair<int, int>(floorx1, i));
-            }
-        }
-        
-        // we insert the intermediate column
-        if(abs(floorx2 - floorx1) > 1)
-        {
-
-            // if the ray only passes two columns, then there is no intermediate columns
-            for(unsigned int i = 0; i < v.size()-1; ++i)
-            {
-                int xinsert = v.at(i).first;
-                int ystart = v.at(i).second;
-                int yend = v.at(i+1).second;
-                if(ystart < yend)
-                {
-                    for(int j = ystart; j <= yend; ++j)
-                    {
-                        result.push_back(std::pair<int, int>(xinsert, j));
-                    }
-                }
-                else
-                {
-                    for(int j = ystart; j >= yend; --j)
-                    {
-                        result.push_back(std::pair<int, int>(xinsert, j));
-                    }
-                }
-            }
-            
-        }
-        
-        // we insert the final column
-        if(floory2 > v.back().second)
-        {
-            int xinsert = v.back().first;
-            for(int i = v.back().second; i <= floory2; ++i)
-            {
-                result.push_back(std::pair<int, int>(xinsert, i));
-            }
-        }
-        else
-        {
-            int xinsert = v.back().first;
-            for(int i = v.back().second; i >= floory2; --i)
-            {
-                result.push_back(std::pair<int, int>(xinsert, i));
-            }
-        }
-
-    }//floorx2 > floorx1
-    else // floorx1 is greater than floorx2. We do things backwards
-    {
-        int xinsert = v.front().first;
-        // we insert the start column
-        if(floory1 < v.front().second)
-        {
-            for(int i = floory1; i <= v.front().second; ++i)
-            {
-                result.push_back(std::pair<int, int>(xinsert, i));
-            }
-        }
-        else
-        {
-            for(int i = floory1; i >= v.front().second; --i)
-            {
-                result.push_back(std::pair<int, int>(xinsert, i));
-            }
-        }
-        
-        // we insert the intermediate column
-        if(abs(floorx2 - floorx1) > 1)
-        {
-
-            // if the ray only passes two columns, then there is no intermediate columns
-            for(unsigned int i = 0; i < v.size()-1; ++i)
-            {
-                int xinsert = v.at(i+1).first;//Here is different
-
-                int ystart = v.at(i).second;
-                int yend = v.at(i+1).second;
-                if(ystart < yend)
-                {
-                    for(int j = ystart; j <= yend; ++j)
-                    {
-                        result.push_back(std::pair<int, int>(xinsert, j));
-                    }
-                }
-                else
-                {
-                    for(int j = ystart; j >= yend; --j)
-                    {
-                        result.push_back(std::pair<int, int>(xinsert, j));
-                    }
-                }
-            }
-            
-        }
-        
-        // we insert the final column
-        if(floory2 > v.back().second)
-        {
-            // int xinsert = v.back().first;
-            for(int i = v.back().second; i <= floory2; ++i)
-            {
-                result.push_back(std::pair<int, int>(floorx2, i));
-            }
-        }
-        else
-        {
-            // int xinsert = v.back().first;
-            for(int i = v.back().second; i >= floory2; --i)
-            {
-                result.push_back(std::pair<int, int>(floorx2, i));
-            }
-        }
-    }//floorx2 < floorx1
 }
-
-
-void newbresenham_same_as_matlab(double x1, double y1, double x2, double y2, 
-	std::vector<std::pair<int, int> >& result) {
-	// std::vector<std::pair<int, int> > result;
-	result.clear();
-
-	int floorx1 = floor(x1);
-	int floorx2 = floor(x2);
-	int floory1 = floor(y1);
-	int floory2 = floor(y2);
-
-	result.reserve(abs(floorx2 - floorx1) + 1 + abs(floory2 - floory1) + 1);
-
-	// if they lie vertically (one above another), we cannot calculate k
-	// so we direct solve this case
-	if (floorx1 == floorx2)
-	{
-		// std::vector<int> L = intelist(y1, y2);
-		if (floory1 < floory2)
-		{
-			for (int i = floory1; i <= floory2; ++i)
-			{
-				result.push_back(std::pair<int, int>(floorx1, i));
-			}
-		}
-		else if (floory1 == floory2)
-		{
-			result.push_back(std::pair<int, int>(floorx1, floory1));
-		}
-		else
-		{
-			for (int i = floory1; i >= floory2; --i)
-			{
-				result.push_back(std::pair<int, int>(floorx1, i));
-			}
-		}
-		return;
-	}
-
-	if (floory1 == floory2)
-	{
-		if (floorx1 < floorx2)
-		{
-			for (int i = floorx1; i <= floorx2; ++i)
-			{
-				result.push_back(std::pair<int, int>(i, floory1));
-			}
-		}
-		else if (floorx1 == floorx2)
-		{
-			result.push_back(std::pair<int, int>(floorx1, floory1));
-		}
-		else
-		{
-			for (int i = floorx1; i >= floorx2; --i)
-			{
-				result.push_back(std::pair<int, int>(i, floory1));
-			}
-		}
-		return;
-	}
-
-	// we get the function of the ray in y=kx+b
-	double k = (y2 - y1) / (x2 - x1);
-	double b = y1 - k * x1;
-
-	int flag;
-
-
-	std::vector<std::pair<int, int> > v;
-	v.reserve(abs(floorx2 - floorx1));
-	if (x1 < x2)
-	{
-		flag = 1;
-		for (int i = floorx1 + 1; i <= floorx2; ++i)
-		{
-			v.push_back(std::pair<int, int>(i, floor(k*i + b)));
-		}
-	}
-	else
-	{
-		flag = -1;
-		for (int i = floorx1; i >= floorx2 + 1; --i)
-		{
-			v.push_back(std::pair<int, int>(i, floor(k*i + b)));
-		}
-	}
-
-	int temp = sign(k)*flag;
-
-	if (floorx2 > floorx1)
-	{
-		// we insert the start column
-		if (floory1 < v.front().second)
-		{
-			for (int i = floory1; i <= v.front().second; ++i)
-			{
-				result.push_back(std::pair<int, int>(floorx1, i));
-			}
-		}
-		else
-		{
-			for (int i = floory1; i >= v.front().second; --i)
-			{
-				result.push_back(std::pair<int, int>(floorx1, i));
-			}
-		}
-
-		// we insert the intermediate column
-		if (abs(floorx2 - floorx1) > 1)
-		{
-
-			// if the ray only passes two columns, then there is no intermediate columns
-			for (unsigned int i = 0; i < v.size() - 1; ++i)
-			{
-				int xinsert = v.at(i).first;
-				int ystart = v.at(i).second;
-				int yend = v.at(i + 1).second;
-				if (ystart < yend)
-				{
-					for (int j = ystart; j <= yend; ++j)
-					{
-						result.push_back(std::pair<int, int>(xinsert, j));
-					}
-				}
-				else
-				{
-					for (int j = ystart; j >= yend; --j)
-					{
-						result.push_back(std::pair<int, int>(xinsert, j));
-					}
-				}
-			}
-
-		}
-
-		// we insert the final column
-		if (floory2 > v.back().second)
-		{
-			int xinsert = v.back().first;
-			for (int i = v.back().second; i <= floory2; ++i)
-			{
-				result.push_back(std::pair<int, int>(xinsert, i));
-			}
-		}
-		else
-		{
-			int xinsert = v.back().first;
-			for (int i = v.back().second; i >= floory2; --i)
-			{
-				result.push_back(std::pair<int, int>(xinsert, i));
-			}
-		}
-
-	}//floorx2 > floorx1
-	else // floorx1 is greater than floorx2. We do things backwards
-	{
-		int xinsert = v.front().first;
-		// we insert the start column
-		if (floory1 < v.front().second)
-		{
-			for (int i = floory1; i <= v.front().second; ++i)
-			{
-				result.push_back(std::pair<int, int>(xinsert, i));
-			}
-		}
-		else
-		{
-			for (int i = floory1; i >= v.front().second; --i)
-			{
-				result.push_back(std::pair<int, int>(xinsert, i));
-			}
-		}
-
-		// we insert the intermediate column
-		if (abs(floorx2 - floorx1) > 1)
-		{
-
-			// if the ray only passes two columns, then there is no intermediate columns
-			for (unsigned int i = 0; i < v.size() - 1; ++i)
-			{
-				int xinsert = v.at(i + 1).first;//Here is different
-
-				int ystart = v.at(i).second;
-				int yend = v.at(i + 1).second;
-				if (ystart < yend)
-				{
-					for (int j = ystart; j <= yend; ++j)
-					{
-						result.push_back(std::pair<int, int>(xinsert, j));
-					}
-				}
-				else
-				{
-					for (int j = ystart; j >= yend; --j)
-					{
-						result.push_back(std::pair<int, int>(xinsert, j));
-					}
-				}
-			}
-
-		}
-
-		// we insert the final column
-		if (floory2 > v.back().second)
-		{
-			// int xinsert = v.back().first;
-			for (int i = v.back().second; i <= floory2; ++i)
-			{
-				result.push_back(std::pair<int, int>(floorx2, i));
-			}
-		}
-		else
-		{
-			// int xinsert = v.back().first;
-			for (int i = v.back().second; i >= floory2; --i)
-			{
-				result.push_back(std::pair<int, int>(floorx2, i));
-			}
-		}
-	}//floorx2 < floorx1
-}
-
 
 double pathLength(const std::vector<double >& thePath)
 {
@@ -805,26 +90,148 @@ double pathLength(const std::vector<double >& thePath)
 		L += sqrt(dx*dx + dy * dy);
 	}
 	return L;
-
 }
-
 
 double pathLength(std::vector<Conf>& thePath)
 {
 	std::vector<double> double_path;
 	for (auto iter = thePath.begin(); iter != thePath.end(); ++iter) {
-		double_path.push_back(iter->x);
-		double_path.push_back(iter->y);
+		double_path.emplace_back(iter->x);
+		double_path.emplace_back(iter->y);
 	}
-	double L = pathLength(double_path);
-	return L;
-
+	return pathLength(double_path);
 }
 
+void calc_index(Conf son, double x_gridsize, double y_gridsize, double theta_gridsize, int& son_x_index, int& son_y_index, int& son_theta_index)
+{
+	son_x_index = floor(son.x / x_gridsize);
+	son_y_index = floor(son.y / y_gridsize);
+	son_theta_index = floor(normalize_angle_positive(son.theta) / theta_gridsize);
+}
 
-    
+std::vector<int> calSwing(std::vector<int> oldH, std::pair<double, double> oldp, std::pair<double, double> newp, const std::vector<Obs>& obs)
+{
+	std::vector<int> newH(oldH.begin(), oldH.end());
+	for (int i = 0; i < obs.size(); ++i)
+	{
+		if (oldp.second >= obs[i].ObsPosition.second && newp.second >= obs[i].ObsPosition.second)
+		{
+			if (oldp.first > obs[i].ObsPosition.first + 0.5 && newp.first < obs[i].ObsPosition.first + 0.5)
+			{
+				if (!oldH.empty() && oldH.back() == i)
+				{
+					newH.pop_back();
+				}
+				else
+				{
+					newH.emplace_back(-i);
+				}
+				return newH;
+			}
+			else if (oldp.first < obs[i].ObsPosition.first + 0.5 && newp.first > obs[i].ObsPosition.first + 0.5)
+			{
+				if (!oldH.empty() && oldH.back() == -i)
+				{
+					newH.pop_back();
+				}
+				else
+				{
+					newH.emplace_back(i);
+				}
+				return newH;
 
+			}
+		}
+	}
 
-    
-    
-    
+	return newH;
+}
+
+int findEqualHCNode(std::vector<int> newH, const std::vector<Conf>& V, std::vector<int> indices)
+{
+	if (indices.empty())
+	{
+		std::cout << "YT: we should not reach here" << std::endl;
+		return -1;
+	}
+
+	for (unsigned int i = 0; i < indices.size(); ++i)
+	{
+		auto& oldH = V[indices[i]].hindex;
+		if (oldH.size() == newH.size())
+		{
+			bool thesame = true;
+			for (unsigned int j = 0; j < oldH.size(); ++j)
+			{
+				if (fabs((double(oldH[j]) - (double)(newH[j])) > 0.1))
+				{
+					thesame = false;
+					break;
+				}
+
+			}
+			if (thesame)
+			{
+				return indices[i];
+			}
+		}
+	}
+
+	std::cout << "YT: we should not reach here" << std::endl;
+	return -1;
+}
+
+bool isEqualHC(std::vector<int> newH, const std::vector<Conf>& Storage,
+	std::vector<int> indices)
+{
+	for (unsigned int i = 0; i < indices.size(); ++i)
+	{
+		auto& oldH = Storage[indices[i]].hindex;
+		if (oldH.size() == newH.size())
+		{
+			bool thesame = true;
+			for (unsigned int j = 0; j < oldH.size(); ++j)
+			{
+				if (fabs((double(oldH[j]) - (double)(newH[j])) > 0.1))
+				{
+					thesame = false;
+					break;
+				}
+			}
+			if (thesame)
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+bool isSEF(const Conf& pose, const double phi_1, const double phi_2)
+{
+	double angle_diff = normalize_angle_positive(pose.phi - pose.theta);
+
+	if (angle_diff >= phi_1 && angle_diff <= phi_2)
+		return true;
+
+	return false;
+}
+
+std::vector<Conf> tracePath(const std::vector<Conf>& V, int index)
+{
+	std::vector<Conf> waypoints;
+	waypoints.clear();
+	Conf cur = V[index];
+	while (1)
+	{
+		if (cur.fatherindex == -1)
+		{
+			waypoints.insert(waypoints.begin(), cur);
+			break;
+		}
+		int fatherindex = cur.fatherindex;
+		waypoints.insert(waypoints.begin(), cur);
+		cur = V[fatherindex];
+	}
+	return waypoints;
+}

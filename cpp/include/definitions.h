@@ -1,7 +1,4 @@
-//#define _USE_MATH_DEFINES
-
-#ifndef _DEFINITIONS_
-#define _DEFINITIONS_
+#pragma once
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -30,17 +27,9 @@ struct Conf{
 
     int fatherindex;
 
-    //std::vector<std::pair<double, double> > obs_vertices;
 	std::vector<double> obs_vertices;
-
 
     std::vector<double> mid_poses_x;
     std::vector<double> mid_poses_y;
     std::vector<double> mid_poses_theta;
-
-    //@TODO： 一些构造函数、拷贝构造函数
-
 };
-
-
-#endif

@@ -32,19 +32,14 @@ std::vector<std::pair<double, double>> dijkstra_4dir( Map* theMap,
 
 	while (1) {
 		if (pos_queue.empty()) {
-			std::cout << "empty queue" << std::endl;
 			std::cout << "dijkstra failed" << std::endl;
-
 			break;
 		}
 
 		int x = pos_queue.front().first;
 		int y = pos_queue.front().second;
 
-		//std::pair<int, int> cur_pos = pos_queue.front();
-		// std::cout<<"cur pos"<<cur_pos(0)<<" "<<cur_pos(1)<<std::endl;
 		pos_queue.pop();
-
 
 		sons.clear();
 		theta_vec.clear();
@@ -52,33 +47,26 @@ std::vector<std::pair<double, double>> dijkstra_4dir( Map* theMap,
 
 		son_pos.first = x - 1;
 		son_pos.second = y;
-		sons.push_back(son_pos);
-		theta_vec.push_back(M_PI);
+		sons.emplace_back(son_pos);
+		theta_vec.emplace_back(M_PI);
 
 		son_pos.first = x;
 		son_pos.second = y - 1;
-		sons.push_back(son_pos);
-		theta_vec.push_back(-M_PI/2);
-
+		sons.emplace_back(son_pos);
+		theta_vec.emplace_back(-M_PI/2);
 
 		son_pos.first = x;
 		son_pos.second = y + 1;
-		sons.push_back(son_pos);
-		theta_vec.push_back(M_PI/2);
+		sons.emplace_back(son_pos);
+		theta_vec.emplace_back(M_PI/2);
 
 		son_pos.first = x + 1;
 		son_pos.second = y;
-		sons.push_back(son_pos);
-		theta_vec.push_back(0);
-
-
-
-
-		// cout<<"x is"<<x<<"y is"<<y<<endl;
-		// cout<<"end x is"<<end_pos[0]<<"end y is"<<end_pos[1]<<endl;
+		sons.emplace_back(son_pos);
+		theta_vec.emplace_back(0);
 
 		if (x == floor(goal_loc.first) && y == floor(goal_loc.second)) {
-			std::cout << "dijkstra:find_path" << std::endl;
+			std::cout << "Dijkstra: find path for initial tether state estimation" << std::endl;
 
 			initial_path.clear();
 
@@ -86,9 +74,9 @@ std::vector<std::pair<double, double>> dijkstra_4dir( Map* theMap,
 			cur.first = x;
 			cur.second = y;
 			while (true) {
-				//std::cout << "cur:[" << cur.first << "," << cur.second << "]" << std::endl;
 				if (cur.first == floor(start_loc.first) && cur.second == floor(start_loc.second))
 				{
+					initial_path.insert(initial_path.begin(), std::pair<double, double>(cur.first + 0.5, cur.second + 0.5));
 					break;
 				}
 				int cur_index = cur.second * xsize + cur.first;
@@ -100,17 +88,11 @@ std::vector<std::pair<double, double>> dijkstra_4dir( Map* theMap,
 				cur.first = father_x;
 				cur.second = father_y;
 			}
-			//std::cout << "inside inital path" << initial_path.size() << std::endl;
 			break;
 		}
 
-
 		for (int i = 0; i < sons.size(); i++) {
 			std::pair<int, int> son_pos = sons[i];
-			// cout<<"x "<<son_pos(0)<<"y "<<son_pos(1)<<endl;
-			/*if (Mmap[son_pos.second * xsize + son_pos.first] == 254) {
-				continue;
-			}*/
 
 			if (!theMap->isCollisionFree(son_pos.first, son_pos.second, theta_vec[i])) {
 				continue;
@@ -130,9 +112,7 @@ std::vector<std::pair<double, double>> dijkstra_4dir( Map* theMap,
 			cost[son_index] = cost[fatherindex] + 1;
 
 			pos_queue.push(son_pos);
-
 		}
-
 	}
 	return initial_path;
 }

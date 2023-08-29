@@ -1,38 +1,36 @@
-#ifndef _TOOL_
-#define _TOOL_
+#pragma once
 
 #include<iostream>
 #include <string>
 #include <vector>
 #include <opencv2/opencv.hpp>
-#include "solver.h"
-#define INF 10000000
+#include "definitions.h"
+#include "map.h"
+
+void calc_index(Conf son, double x_gridsize, double y_gridsize, double theta_gridsize, int& son_x_index, int& son_y_index, int& son_theta_index);
+
+std::vector<int> calSwing(std::vector<int> oldH, std::pair<double, double> oldp, std::pair<double, double> oldp2, const std::vector<Obs>& obs);
+
+int findEqualHCNode(std::vector<int> newH, const std::vector<Conf>& V, std::vector<int> indices);
+
+bool isEqualHC(std::vector<int> newH, const std::vector<Conf>& Storage, std::vector<int> indices);
+
+bool isPointInOrOnTri(const double* tri, const double& px, const double& py);
+
+bool isSEF(const Conf& pose, const double phi_1, const double phi_2);
+
+bool isTriVertex(const double* tri, const double& px, const double& py);
 
 double normalize_angle(const double theta);
 
 double normalize_angle_positive(const double theta);
 
-
-void newbresenham(double x1, double y1, double x2, double y2, int xsize, std::vector<int>& result);
-
-void newbresenham(double x1, double y1, double x2, double y2, std::vector<std::pair<int, int> >& result);
-
-bool pnpoly(int nvert, float *vertx, float *verty, float testx, float testy);
-//bool isCollisionFree(double x, double y, double theta);
-// std::vector<Eigen::Vector2f> tryRemoveObstacles(std::vector<Eigen::Vector2f> obs_list,Eigen::Vector2f new_s_point);
-//std::vector<std::pair<double,double>> tryRemoveObstacles(std::vector<std::pair<double, double>> obs_list, std::pair<double, double> new_s_point);
-int sign(float x);
-
-//double pathLength(const std::vector<std::pair<double, double> >& thePath);
-
 double pathLength(const std::vector<double >& thePath);
+
 double pathLength(std::vector<Conf>& thePath);
 
+bool pnpoly(int nvert, double *vertx, double *verty, double testx, double testy);
 
+int sign(float x);
 
-#endif
-
-
-
-
-
+std::vector<Conf> tracePath(const std::vector<Conf>& V, int index);
