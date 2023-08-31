@@ -1,5 +1,14 @@
-# Self-Entanglement-Free Tethered Path Planning for Non-Particle Differential-Driven Robot
-## Introduction
+# SEFTPP
 
-This repository is the supplementary codes for our paper submitted to IEEE International Conference on Robotics and Automation (ICRA) 2023. C++ version is released. Implementation details will be made available after the paper is accepted.
+This repository contains the supplmentary code for the following submissions:
 
+[Self-Entanglement-Free Tethered Path Planning for Non-Particle Differential-Driven Robot(accepted)](https://www.researchgate.net/publication/372122988)
+
+[Sparse Waypoint Validity Checking for Self-Entanglement-Free Tethered Path Planning(submitted)](https://www.researchgate.net/publication/373518755)
+
+The code in this repository will be re-written and re-structured into a ROS package once the submissions are accepted and finalized.
+
+
+## Dependencies
+
+opencv: It is only used for inputting the map image. 
